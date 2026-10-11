@@ -178,6 +178,49 @@
       padding: 12px 14px;
     }
 
+    .progress {
+      border: 1px solid #d7e2ee;
+      background: #f8fbff;
+      margin-top: 14px;
+      padding: 12px 14px;
+    }
+
+    .progress-track {
+      height: 12px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #dce8f5;
+    }
+
+    .progress-bar {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #1f73e8, #16a34a);
+      transition: width 0.18s ease;
+    }
+
+    .filters {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: minmax(220px, 1fr) 170px 170px;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfdff;
+    }
+
+    input,
+    select {
+      min-height: 40px;
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--ink);
+      font: inherit;
+      font-size: 14px;
+      padding: 8px 10px;
+    }
+
     .warning {
       border: 1px solid #f4c152;
       background: #fff8e1;
@@ -244,6 +287,7 @@
 
     @media (max-width: 960px) {
       .grid { grid-template-columns: 1fr; }
+      .filters { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -270,7 +314,7 @@
             <p>Tambien puedes seleccionarlos manualmente. Se pueden subir varias OF a la vez.</p>
             <div style="margin-top: 16px;">
               <input id="fileInput" type="file" accept="application/pdf,.pdf" multiple hidden>
-              <button id="selectButton" class="primary" type="button">Seleccionar PDFs</button>
+              <button id="selectButton" class="primary" type="button">Seleccionar o anadir PDFs</button>
             </div>
           </div>
         </div>
@@ -284,6 +328,13 @@
         </div>
 
         <div id="message" class="notice" hidden></div>
+        <div id="progressBox" class="progress" hidden>
+          <div class="panel-head" style="border-bottom:0; padding:0 0 10px;">
+            <strong id="progressText">Preparado</strong>
+            <span class="muted" id="progressCount">0 / 0</span>
+          </div>
+          <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
+        </div>
         <div id="warningBox" class="warning" hidden>
           <strong>Revisiones recomendadas</strong>
           <ul id="warnings"></ul>
@@ -304,6 +355,20 @@
       <div class="panel-head">
         <strong>Resultado extraido</strong>
         <span class="muted"><span id="rowCount">0</span> lineas</span>
+      </div>
+      <div class="filters">
+        <input id="searchInput" type="search" placeholder="Buscar OF, articulo, lote, descripcion o archivo...">
+        <select id="confidenceFilter">
+          <option value="">Todas las confianzas</option>
+          <option value="ALTA">Solo ALTA</option>
+          <option value="MEDIA">Solo MEDIA</option>
+          <option value="BAJA">Solo BAJA</option>
+        </select>
+        <select id="reviewFilter">
+          <option value="">Todas las lineas</option>
+          <option value="avisos">Solo con avisos</option>
+          <option value="duplicados">Solo duplicados</option>
+        </select>
       </div>
       <div class="table-wrap">
         <table>
@@ -354,6 +419,13 @@
     const warningsList = document.getElementById("warnings");
     const resultBody = document.getElementById("resultBody");
     const rowCount = document.getElementById("rowCount");
+    const searchInput = document.getElementById("searchInput");
+    const confidenceFilter = document.getElementById("confidenceFilter");
+    const reviewFilter = document.getElementById("reviewFilter");
+    const progressBox = document.getElementById("progressBox");
+    const progressText = document.getElementById("progressText");
+    const progressCount = document.getElementById("progressCount");
+    const progressBar = document.getElementById("progressBar");
 
     function clean(value) {
       return String(value || "").replace(/\s+/g, " ").trim();
@@ -385,6 +457,13 @@
       message.textContent = text || "";
     }
 
+    function setProgress(done, total, text) {
+      progressBox.hidden = total === 0;
+      progressText.textContent = text || "Procesando PDFs";
+      progressCount.textContent = `${done} / ${total}`;
+      progressBar.style.width = total ? `${Math.round((done / total) * 100)}%` : "0%";
+    }
+
     function renderFiles() {
       filePanel.hidden = state.files.length === 0;
       fileCount.textContent = state.files.length;
@@ -407,19 +486,70 @@
       const lots = new Set(state.rows.map((row) => row.lote).filter(Boolean));
       document.getElementById("statOfs").textContent = ofs.size;
       document.getElementById("statLots").textContent = lots.size;
-      document.getElementById("statReview").textContent = state.rows.filter((row) => row.confianza !== "ALTA").length;
+      document.getElementById("statReview").textContent = state.rows.filter((row) => row.confianza !== "ALTA" || row.aviso || row.duplicado).length;
       rowCount.textContent = state.rows.length;
       exportButton.disabled = state.rows.length === 0;
     }
 
+    function markDuplicateRows() {
+      const seenLine = new Map();
+      state.rows.forEach((row) => {
+        row.duplicado = "";
+        const lineKey = [row.ordenFabricacion, row.codigoArticulo, row.lote, row.cantidad, row.unidad].join("|");
+        if (lineKey.replace(/\|/g, "")) {
+          seenLine.set(lineKey, (seenLine.get(lineKey) || 0) + 1);
+        }
+      });
+
+      state.rows.forEach((row) => {
+        const lineKey = [row.ordenFabricacion, row.codigoArticulo, row.lote, row.cantidad, row.unidad].join("|");
+        if ((seenLine.get(lineKey) || 0) > 1) row.duplicado = "Linea repetida";
+      });
+    }
+
+    function filteredRows() {
+      const q = clean(searchInput.value).toLowerCase();
+      const confidence = confidenceFilter.value;
+      const review = reviewFilter.value;
+      return state.rows.filter((row) => {
+        const haystack = [
+          row.archivo,
+          row.ordenFabricacion,
+          row.fecha,
+          row.producto,
+          row.loteOf,
+          row.codigoArticulo,
+          row.descripcion,
+          row.lote,
+          row.cantidad,
+          row.unidad,
+          row.confianza,
+          row.aviso,
+          row.duplicado
+        ].join(" ").toLowerCase();
+        if (q && !haystack.includes(q)) return false;
+        if (confidence && row.confianza !== confidence) return false;
+        if (review === "avisos" && !row.aviso && !row.duplicado) return false;
+        if (review === "duplicados" && !row.duplicado) return false;
+        return true;
+      });
+    }
+
     function renderRows() {
+      const visibleRows = filteredRows();
       if (!state.rows.length) {
         resultBody.innerHTML = `<tr><td colspan="12" style="text-align:center; color:#64748b; padding:28px;">Sube PDFs y pulsa Extraer datos para generar el maestro.</td></tr>`;
         renderStats();
         return;
       }
 
-      resultBody.innerHTML = state.rows.map((row) => `
+      if (!visibleRows.length) {
+        resultBody.innerHTML = `<tr><td colspan="12" style="text-align:center; color:#64748b; padding:28px;">No hay lineas con estos filtros.</td></tr>`;
+        renderStats();
+        return;
+      }
+
+      resultBody.innerHTML = visibleRows.map((row) => `
         <tr>
           <td>${escapeHtml(row.archivo)}</td>
           <td class="bold">${escapeHtml(row.ordenFabricacion || "-")}</td>
@@ -432,7 +562,7 @@
           <td class="right">${escapeHtml(row.cantidad || "-")}</td>
           <td>${escapeHtml(row.unidad || "-")}</td>
           <td class="${row.confianza === "ALTA" ? "ok" : row.confianza === "MEDIA" ? "review" : "bad"}">${escapeHtml(row.confianza)}</td>
-          <td>${escapeHtml(row.aviso || "-")}</td>
+          <td>${escapeHtml([row.aviso, row.duplicado].filter(Boolean).join(" | ") || "-")}</td>
         </tr>
       `).join("");
       renderStats();
@@ -451,9 +581,14 @@
     function addFiles(fileList) {
       const selected = Array.from(fileList || []).filter((file) => file.name.toLowerCase().endsWith(".pdf"));
       const byKey = new Map(state.files.map((file) => [`${file.name}-${file.size}`, file]));
-      selected.forEach((file) => byKey.set(`${file.name}-${file.size}`, file));
+      let repeated = 0;
+      selected.forEach((file) => {
+        const key = `${file.name}-${file.size}`;
+        if (byKey.has(key)) repeated++;
+        byKey.set(key, file);
+      });
       state.files = Array.from(byKey.values());
-      setMessage("");
+      setMessage(repeated ? `${repeated} PDF ya estaban en la lista y no se han duplicado.` : "");
       renderFiles();
     }
 
@@ -537,10 +672,13 @@
       setMessage("Leyendo PDFs en memoria...");
       state.rows = [];
       state.warnings = [];
+      setProgress(0, state.files.length, "Preparando PDFs");
       renderRows();
       renderWarnings();
 
-      for (const file of state.files) {
+      for (let index = 0; index < state.files.length; index++) {
+        const file = state.files[index];
+        setProgress(index, state.files.length, `Leyendo ${file.name}`);
         try {
           const result = await parsePdf(file);
           state.rows.push(...result.rows);
@@ -548,8 +686,14 @@
         } catch (error) {
           state.warnings.push(`${file.name}: no se pudo leer el PDF. ${error?.message || error}`);
         }
+        markDuplicateRows();
+        renderRows();
+        renderWarnings();
+        setProgress(index + 1, state.files.length, `Procesado ${file.name}`);
+        await new Promise((resolve) => setTimeout(resolve, 0));
       }
 
+      markDuplicateRows();
       setMessage(state.rows.length ? `Extraccion terminada: ${state.rows.length} lineas detectadas.` : "No se han detectado lineas.");
       renderRows();
       renderWarnings();
@@ -575,12 +719,41 @@
         Cantidad: row.cantidad,
         Unidad: row.unidad,
         Confianza: row.confianza,
-        Aviso: row.aviso
+        Aviso: row.aviso,
+        Duplicado: row.duplicado || ""
       }));
 
       const workbook = XLSX.utils.book_new();
       const sheet = XLSX.utils.json_to_sheet(data);
+      const ofs = new Set(state.rows.map((row) => row.ordenFabricacion).filter(Boolean));
+      const lots = new Set(state.rows.map((row) => row.lote).filter(Boolean));
+      const articles = new Set(state.rows.map((row) => row.codigoArticulo).filter(Boolean));
+      const reviewRows = state.rows.filter((row) => row.confianza !== "ALTA" || row.aviso || row.duplicado);
+      const resumen = [
+        { Campo: "PDF cargados", Valor: state.files.length },
+        { Campo: "Lineas extraidas", Valor: state.rows.length },
+        { Campo: "OF detectadas", Valor: ofs.size },
+        { Campo: "Articulos distintos", Valor: articles.size },
+        { Campo: "Lotes distintos", Valor: lots.size },
+        { Campo: "Lineas a revisar", Valor: reviewRows.length },
+        { Campo: "Avisos de lectura", Valor: state.warnings.length }
+      ];
+      const avisos = [
+        ...state.warnings.map((warning) => ({ Tipo: "PDF", Aviso: warning, Archivo: "", OF: "", Articulo: "", Lote: "" })),
+        ...reviewRows.map((row) => ({
+          Tipo: row.duplicado ? "DUPLICADO" : "REVISION",
+          Aviso: [row.aviso, row.duplicado].filter(Boolean).join(" | "),
+          Archivo: row.archivo,
+          OF: row.ordenFabricacion,
+          Articulo: row.codigoArticulo,
+          Lote: row.lote
+        }))
+      ];
+      const resumenSheet = XLSX.utils.json_to_sheet(resumen);
+      const avisosSheet = XLSX.utils.json_to_sheet(avisos.length ? avisos : [{ Tipo: "OK", Aviso: "Sin avisos", Archivo: "", OF: "", Articulo: "", Lote: "" }]);
       XLSX.utils.book_append_sheet(workbook, sheet, "Composiciones");
+      XLSX.utils.book_append_sheet(workbook, resumenSheet, "Resumen");
+      XLSX.utils.book_append_sheet(workbook, avisosSheet, "Avisos");
       XLSX.writeFile(workbook, `maestro-hojas-composicion-${new Date().toISOString().slice(0, 10)}.xlsx`);
     }
 
@@ -594,6 +767,7 @@
       state.warnings = [];
       fileInput.value = "";
       setMessage("");
+      setProgress(0, 0, "");
       renderFiles();
       renderRows();
       renderWarnings();
@@ -614,6 +788,9 @@
     });
 
     dropZone.addEventListener("drop", (event) => addFiles(event.dataTransfer.files));
+    searchInput.addEventListener("input", renderRows);
+    confidenceFilter.addEventListener("change", renderRows);
+    reviewFilter.addEventListener("change", renderRows);
 
     renderFiles();
     renderRows();

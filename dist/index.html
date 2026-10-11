@@ -1,0 +1,623 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lector de hojas de composicion</title>
+  <script src="./vendor/pdf.min.js"></script>
+  <script src="./vendor/xlsx.full.min.js"></script>
+  <style>
+    :root {
+      --bg: #eef3f8;
+      --ink: #0b1b33;
+      --muted: #60758d;
+      --line: #c8d6e5;
+      --blue: #1f73e8;
+      --green: #047857;
+      --amber: #92400e;
+      --red: #b91c1c;
+      --white: #ffffff;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Arial, Helvetica, sans-serif;
+      letter-spacing: 0;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+      padding: 16px 20px;
+    }
+
+    main {
+      padding: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 900;
+    }
+
+    p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    button {
+      min-height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: linear-gradient(180deg, #fff, #f4f8fc);
+      color: #13304a;
+      cursor: pointer;
+      font: inherit;
+      font-size: 14px;
+      font-weight: 800;
+      padding: 8px 12px;
+    }
+
+    button.primary {
+      border-color: #1769d6;
+      background: linear-gradient(180deg, #2f86f6, #1769d6);
+      color: #fff;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: minmax(0, 1fr) 320px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.94);
+      box-shadow: 0 1px 2px rgba(16, 34, 53, 0.05);
+    }
+
+    .drop {
+      display: grid;
+      min-height: 220px;
+      place-items: center;
+      border: 2px dashed #9eb3c8;
+      background: #f8fbff;
+      padding: 26px;
+      text-align: center;
+    }
+
+    .drop.dragover {
+      border-color: var(--blue);
+      background: #edf7ff;
+    }
+
+    .drop strong {
+      display: block;
+      font-size: 18px;
+      font-weight: 900;
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--line);
+      padding: 12px 14px;
+    }
+
+    .panel-head strong {
+      font-size: 15px;
+      font-weight: 900;
+    }
+
+    .files {
+      max-height: 180px;
+      overflow: auto;
+      padding: 8px 12px;
+    }
+
+    .file-row,
+    .stat {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid #edf3f9;
+      padding: 10px 0;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .file-row:last-child,
+    .stat:last-child {
+      border-bottom: 0;
+    }
+
+    .muted {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .notice {
+      border: 1px solid #9cc2ff;
+      background: #eff6ff;
+      color: #0f3b9f;
+      font-size: 14px;
+      font-weight: 800;
+      margin-top: 14px;
+      padding: 12px 14px;
+    }
+
+    .warning {
+      border: 1px solid #f4c152;
+      background: #fff8e1;
+      color: var(--amber);
+      font-size: 14px;
+      margin-top: 14px;
+      padding: 12px 14px;
+    }
+
+    .warning strong {
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    .warning ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+
+    .stats {
+      padding: 10px 14px;
+    }
+
+    .stat span:last-child {
+      color: var(--ink);
+      font-size: 22px;
+      font-weight: 900;
+    }
+
+    .table-wrap {
+      overflow: auto;
+    }
+
+    table {
+      width: 100%;
+      min-width: 1280px;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: 13px;
+    }
+
+    th {
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #f8fbff, #edf3f9);
+      color: #24415f;
+      font-size: 12px;
+      font-weight: 900;
+      padding: 9px 10px;
+      text-align: left;
+    }
+
+    td {
+      border-bottom: 1px solid #e7eef6;
+      color: #17324d;
+      padding: 9px 10px;
+      vertical-align: top;
+    }
+
+    .right { text-align: right; }
+    .bold { font-weight: 900; }
+    .ok { color: var(--green); font-weight: 900; }
+    .review { color: var(--amber); font-weight: 900; }
+    .bad { color: var(--red); font-weight: 900; }
+
+    @media (max-width: 960px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Lector de hojas de composicion</h1>
+    <p>Procesa PDFs en este navegador y genera un Excel maestro con los lotes necesarios por OF. No guarda los PDFs.</p>
+  </header>
+
+  <main>
+    <div class="toolbar">
+      <div></div>
+      <div class="actions">
+        <button id="clearButton" type="button">Limpiar</button>
+        <button id="exportButton" class="primary" type="button" disabled>Descargar Excel maestro</button>
+      </div>
+    </div>
+
+    <section class="grid">
+      <div class="card">
+        <div id="dropZone" class="drop">
+          <div>
+            <strong>Arrastra aqui los PDFs de hojas de composicion</strong>
+            <p>Tambien puedes seleccionarlos manualmente. Se pueden subir varias OF a la vez.</p>
+            <div style="margin-top: 16px;">
+              <input id="fileInput" type="file" accept="application/pdf,.pdf" multiple hidden>
+              <button id="selectButton" class="primary" type="button">Seleccionar PDFs</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="filePanel" hidden>
+          <div class="panel-head">
+            <strong><span id="fileCount">0</span> PDF preparados</strong>
+            <button id="extractButton" type="button">Extraer datos</button>
+          </div>
+          <div id="fileList" class="files"></div>
+        </div>
+
+        <div id="message" class="notice" hidden></div>
+        <div id="warningBox" class="warning" hidden>
+          <strong>Revisiones recomendadas</strong>
+          <ul id="warnings"></ul>
+        </div>
+      </div>
+
+      <aside class="card">
+        <div class="stats">
+          <div class="stat"><span>PDF cargados</span><span id="statFiles">0</span></div>
+          <div class="stat"><span>OF detectadas</span><span id="statOfs">0</span></div>
+          <div class="stat"><span>Lotes distintos</span><span id="statLots">0</span></div>
+          <div class="stat"><span>Lineas a revisar</span><span id="statReview">0</span></div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="card" style="margin-top: 14px;">
+      <div class="panel-head">
+        <strong>Resultado extraido</strong>
+        <span class="muted"><span id="rowCount">0</span> lineas</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Archivo</th>
+              <th>OF</th>
+              <th>Fecha</th>
+              <th>Producto</th>
+              <th>Lote OF</th>
+              <th>Codigo articulo</th>
+              <th>Descripcion</th>
+              <th>Lote</th>
+              <th>Cantidad</th>
+              <th>Unidad</th>
+              <th>Confianza</th>
+              <th>Aviso</th>
+            </tr>
+          </thead>
+          <tbody id="resultBody">
+            <tr><td colspan="12" style="text-align:center; color:#64748b; padding:28px;">Sube PDFs y pulsa Extraer datos para generar el maestro.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    pdfjsLib.GlobalWorkerOptions.workerSrc = "./vendor/pdf.worker.min.js";
+
+    const state = {
+      files: [],
+      rows: [],
+      warnings: []
+    };
+
+    const fileInput = document.getElementById("fileInput");
+    const selectButton = document.getElementById("selectButton");
+    const dropZone = document.getElementById("dropZone");
+    const filePanel = document.getElementById("filePanel");
+    const fileList = document.getElementById("fileList");
+    const fileCount = document.getElementById("fileCount");
+    const extractButton = document.getElementById("extractButton");
+    const exportButton = document.getElementById("exportButton");
+    const clearButton = document.getElementById("clearButton");
+    const message = document.getElementById("message");
+    const warningBox = document.getElementById("warningBox");
+    const warningsList = document.getElementById("warnings");
+    const resultBody = document.getElementById("resultBody");
+    const rowCount = document.getElementById("rowCount");
+
+    function clean(value) {
+      return String(value || "").replace(/\s+/g, " ").trim();
+    }
+
+    function sameLine(items, y, minX, maxX) {
+      return clean(
+        items
+          .filter((item) => Math.abs(item.y - y) <= 4 && item.x >= minX && item.x < maxX)
+          .sort((a, b) => a.x - b.x)
+          .map((item) => item.text)
+          .join(" ")
+      );
+    }
+
+    function findHeaderValue(items, minX, maxX, minY, maxY, pattern) {
+      const candidates = items
+        .filter((item) => item.x >= minX && item.x < maxX && item.y >= minY && item.y <= maxY && pattern.test(item.text))
+        .sort((a, b) => b.y - a.y || a.x - b.x);
+      return candidates[0]?.text || "";
+    }
+
+    function normalizeDate(value) {
+      return clean(value).match(/\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/)?.[0] || "";
+    }
+
+    function setMessage(text) {
+      message.hidden = !text;
+      message.textContent = text || "";
+    }
+
+    function renderFiles() {
+      filePanel.hidden = state.files.length === 0;
+      fileCount.textContent = state.files.length;
+      document.getElementById("statFiles").textContent = state.files.length;
+      fileList.innerHTML = state.files.map((file) => `
+        <div class="file-row">
+          <span>${escapeHtml(file.name)}</span>
+          <span class="muted">${Math.round(file.size / 1024)} KB</span>
+        </div>
+      `).join("");
+    }
+
+    function renderWarnings() {
+      warningBox.hidden = state.warnings.length === 0;
+      warningsList.innerHTML = state.warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("");
+    }
+
+    function renderStats() {
+      const ofs = new Set(state.rows.map((row) => row.ordenFabricacion).filter(Boolean));
+      const lots = new Set(state.rows.map((row) => row.lote).filter(Boolean));
+      document.getElementById("statOfs").textContent = ofs.size;
+      document.getElementById("statLots").textContent = lots.size;
+      document.getElementById("statReview").textContent = state.rows.filter((row) => row.confianza !== "ALTA").length;
+      rowCount.textContent = state.rows.length;
+      exportButton.disabled = state.rows.length === 0;
+    }
+
+    function renderRows() {
+      if (!state.rows.length) {
+        resultBody.innerHTML = `<tr><td colspan="12" style="text-align:center; color:#64748b; padding:28px;">Sube PDFs y pulsa Extraer datos para generar el maestro.</td></tr>`;
+        renderStats();
+        return;
+      }
+
+      resultBody.innerHTML = state.rows.map((row) => `
+        <tr>
+          <td>${escapeHtml(row.archivo)}</td>
+          <td class="bold">${escapeHtml(row.ordenFabricacion || "-")}</td>
+          <td>${escapeHtml(row.fecha || "-")}</td>
+          <td>${escapeHtml(row.producto || "-")}</td>
+          <td>${escapeHtml(row.loteOf || "-")}</td>
+          <td class="bold">${escapeHtml(row.codigoArticulo || "-")}</td>
+          <td>${escapeHtml(row.descripcion || "-")}</td>
+          <td class="bold">${escapeHtml(row.lote || "-")}</td>
+          <td class="right">${escapeHtml(row.cantidad || "-")}</td>
+          <td>${escapeHtml(row.unidad || "-")}</td>
+          <td class="${row.confianza === "ALTA" ? "ok" : row.confianza === "MEDIA" ? "review" : "bad"}">${escapeHtml(row.confianza)}</td>
+          <td>${escapeHtml(row.aviso || "-")}</td>
+        </tr>
+      `).join("");
+      renderStats();
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;"
+      })[char]);
+    }
+
+    function addFiles(fileList) {
+      const selected = Array.from(fileList || []).filter((file) => file.name.toLowerCase().endsWith(".pdf"));
+      const byKey = new Map(state.files.map((file) => [`${file.name}-${file.size}`, file]));
+      selected.forEach((file) => byKey.set(`${file.name}-${file.size}`, file));
+      state.files = Array.from(byKey.values());
+      setMessage("");
+      renderFiles();
+    }
+
+    async function parsePdf(file) {
+      const buffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+      const rows = [];
+      const warnings = [];
+
+      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+        const page = await pdf.getPage(pageNumber);
+        const textContent = await page.getTextContent();
+        const items = textContent.items
+          .map((item) => ({
+            text: clean(item.str),
+            x: Math.round(item.transform[4]),
+            y: Math.round(item.transform[5])
+          }))
+          .filter((item) => item.text.length > 0);
+
+        const pageText = items.map((item) => item.text).join(" ");
+        if (!/HOJA DE COMPOSICI[ÓO]N/i.test(pageText)) continue;
+
+        const ordenFabricacion =
+          findHeaderValue(items, 390, 520, 585, 650, /^\d{5,8}$/) ||
+          clean(pageText.match(/HOJA DE COMPOSICI[ÓO]N\s+(\d{5,8})/i)?.[1] || "");
+        const fecha = normalizeDate(findHeaderValue(items, 400, 520, 560, 610, /\d{1,2}[/-]\d{1,2}[/-]\d{2,4}/));
+        const producto = sameLine(items, 575, 40, 335);
+        const loteOf = findHeaderValue(items, 160, 310, 515, 555, /[A-Z0-9]+-[A-Z0-9]+-[A-Z0-9]+/i);
+
+        const codeItems = items
+          .filter((item) => item.x >= 40 && item.x <= 125 && /^\d{8,12}$/.test(item.text))
+          .sort((a, b) => b.y - a.y);
+
+        if (!codeItems.length) {
+          warnings.push(`${file.name}: no se han detectado lineas en la pagina ${pageNumber}.`);
+        }
+
+        for (const code of codeItems) {
+          const descripcion = sameLine(items, code.y, 130, 345);
+          const lote = sameLine(items, code.y, 345, 455);
+          const cantidad = sameLine(items, code.y, 455, 515);
+          const unidad = sameLine(items, code.y, 515, 560);
+          const missing = [
+            descripcion ? "" : "descripcion",
+            lote ? "" : "lote",
+            cantidad ? "" : "cantidad",
+            unidad ? "" : "unidad"
+          ].filter(Boolean);
+
+          rows.push({
+            archivo: file.name,
+            ordenFabricacion,
+            fecha,
+            producto,
+            loteOf,
+            codigoArticulo: code.text,
+            descripcion,
+            lote,
+            cantidad,
+            unidad,
+            confianza: missing.length === 0 ? "ALTA" : missing.length <= 2 ? "MEDIA" : "BAJA",
+            aviso: missing.length ? `Revisar: falta ${missing.join(", ")}` : ""
+          });
+        }
+      }
+
+      if (!rows.length) warnings.push(`${file.name}: no se encontro una pagina con HOJA DE COMPOSICION.`);
+      await pdf.destroy();
+      return { rows, warnings };
+    }
+
+    async function extractAll() {
+      if (!state.files.length) {
+        setMessage("Primero sube uno o varios PDFs.");
+        return;
+      }
+
+      extractButton.disabled = true;
+      extractButton.textContent = "Extrayendo...";
+      setMessage("Leyendo PDFs en memoria...");
+      state.rows = [];
+      state.warnings = [];
+      renderRows();
+      renderWarnings();
+
+      for (const file of state.files) {
+        try {
+          const result = await parsePdf(file);
+          state.rows.push(...result.rows);
+          state.warnings.push(...result.warnings);
+        } catch (error) {
+          state.warnings.push(`${file.name}: no se pudo leer el PDF. ${error?.message || error}`);
+        }
+      }
+
+      setMessage(state.rows.length ? `Extraccion terminada: ${state.rows.length} lineas detectadas.` : "No se han detectado lineas.");
+      renderRows();
+      renderWarnings();
+      extractButton.disabled = false;
+      extractButton.textContent = "Extraer datos";
+    }
+
+    function exportExcel() {
+      if (!state.rows.length) {
+        setMessage("No hay datos para exportar.");
+        return;
+      }
+
+      const data = state.rows.map((row) => ({
+        Archivo: row.archivo,
+        OF: row.ordenFabricacion,
+        Fecha: row.fecha,
+        Producto: row.producto,
+        "Lote OF": row.loteOf,
+        "Codigo articulo": row.codigoArticulo,
+        Descripcion: row.descripcion,
+        Lote: row.lote,
+        Cantidad: row.cantidad,
+        Unidad: row.unidad,
+        Confianza: row.confianza,
+        Aviso: row.aviso
+      }));
+
+      const workbook = XLSX.utils.book_new();
+      const sheet = XLSX.utils.json_to_sheet(data);
+      XLSX.utils.book_append_sheet(workbook, sheet, "Composiciones");
+      XLSX.writeFile(workbook, `maestro-hojas-composicion-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    }
+
+    selectButton.addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", (event) => addFiles(event.target.files));
+    extractButton.addEventListener("click", extractAll);
+    exportButton.addEventListener("click", exportExcel);
+    clearButton.addEventListener("click", () => {
+      state.files = [];
+      state.rows = [];
+      state.warnings = [];
+      fileInput.value = "";
+      setMessage("");
+      renderFiles();
+      renderRows();
+      renderWarnings();
+    });
+
+    ["dragenter", "dragover"].forEach((eventName) => {
+      dropZone.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        dropZone.classList.add("dragover");
+      });
+    });
+
+    ["dragleave", "drop"].forEach((eventName) => {
+      dropZone.addEventListener(eventName, (event) => {
+        event.preventDefault();
+        dropZone.classList.remove("dragover");
+      });
+    });
+
+    dropZone.addEventListener("drop", (event) => addFiles(event.dataTransfer.files));
+
+    renderFiles();
+    renderRows();
+    renderWarnings();
+  </script>
+</body>
+</html>

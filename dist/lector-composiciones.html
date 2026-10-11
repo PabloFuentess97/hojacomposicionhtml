@@ -285,9 +285,53 @@
     .review { color: var(--amber); font-weight: 900; }
     .bad { color: var(--red); font-weight: 900; }
 
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: grid;
+      place-items: center;
+      background: rgba(11, 27, 51, 0.45);
+      padding: 18px;
+    }
+
+    .modal {
+      width: min(760px, 100%);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 20px 60px rgba(11, 27, 51, 0.28);
+    }
+
+    .modal-body {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      padding: 14px;
+    }
+
+    .modal-body label {
+      display: grid;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .modal-body label.wide {
+      grid-column: 1 / -1;
+    }
+
+    .small-btn {
+      min-height: 32px;
+      padding: 5px 9px;
+      font-size: 12px;
+    }
+
     @media (max-width: 960px) {
       .grid { grid-template-columns: 1fr; }
       .filters { grid-template-columns: 1fr; }
+      .modal-body { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -301,6 +345,8 @@
     <div class="toolbar">
       <div></div>
       <div class="actions">
+        <input id="excelInput" type="file" accept=".xlsx,.xls" hidden>
+        <button id="importExcelButton" type="button">Importar Excel anterior</button>
         <button id="clearButton" type="button">Limpiar</button>
         <button id="exportButton" class="primary" type="button" disabled>Descargar Excel maestro</button>
       </div>
@@ -386,15 +432,49 @@
               <th>Unidad</th>
               <th>Confianza</th>
               <th>Aviso</th>
+              <th>Acciones</th>
             </tr>
           </thead>
           <tbody id="resultBody">
-            <tr><td colspan="12" style="text-align:center; color:#64748b; padding:28px;">Sube PDFs y pulsa Extraer datos para generar el maestro.</td></tr>
+            <tr><td colspan="13" style="text-align:center; color:#64748b; padding:28px;">Sube PDFs y pulsa Extraer datos para generar el maestro.</td></tr>
           </tbody>
         </table>
       </div>
     </section>
   </main>
+
+  <div id="editModal" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="panel-head">
+        <strong>Editar linea</strong>
+        <button id="closeEditButton" class="small-btn" type="button">Cerrar</button>
+      </div>
+      <div class="modal-body">
+        <label>Archivo<input id="editArchivo" type="text"></label>
+        <label>OF<input id="editOF" type="text"></label>
+        <label>Fecha<input id="editFecha" type="text"></label>
+        <label>Lote OF<input id="editLoteOf" type="text"></label>
+        <label class="wide">Producto<input id="editProducto" type="text"></label>
+        <label>Codigo articulo<input id="editCodigo" type="text"></label>
+        <label>Lote<input id="editLote" type="text"></label>
+        <label class="wide">Descripcion<input id="editDescripcion" type="text"></label>
+        <label>Cantidad<input id="editCantidad" type="text"></label>
+        <label>Unidad<input id="editUnidad" type="text"></label>
+        <label>Confianza
+          <select id="editConfianza">
+            <option value="ALTA">ALTA</option>
+            <option value="MEDIA">MEDIA</option>
+            <option value="BAJA">BAJA</option>
+          </select>
+        </label>
+        <label>Aviso<input id="editAviso" type="text"></label>
+      </div>
+      <div class="panel-head" style="justify-content:flex-end;">
+        <button id="deleteEditButton" type="button">Eliminar linea</button>
+        <button id="saveEditButton" class="primary" type="button">Guardar cambios</button>
+      </div>
+    </div>
+  </div>
 
   <script>
     pdfjsLib.GlobalWorkerOptions.workerSrc = "./vendor/pdf.worker.min.js";
@@ -413,6 +493,8 @@
     const fileCount = document.getElementById("fileCount");
     const extractButton = document.getElementById("extractButton");
     const exportButton = document.getElementById("exportButton");
+    const importExcelButton = document.getElementById("importExcelButton");
+    const excelInput = document.getElementById("excelInput");
     const clearButton = document.getElementById("clearButton");
     const message = document.getElementById("message");
     const warningBox = document.getElementById("warningBox");
@@ -426,6 +508,11 @@
     const progressText = document.getElementById("progressText");
     const progressCount = document.getElementById("progressCount");
     const progressBar = document.getElementById("progressBar");
+    const editModal = document.getElementById("editModal");
+    const closeEditButton = document.getElementById("closeEditButton");
+    const saveEditButton = document.getElementById("saveEditButton");
+    const deleteEditButton = document.getElementById("deleteEditButton");
+    let editingIndex = -1;
 
     function clean(value) {
       return String(value || "").replace(/\s+/g, " ").trim();
@@ -538,13 +625,13 @@
     function renderRows() {
       const visibleRows = filteredRows();
       if (!state.rows.length) {
-        resultBody.innerHTML = `<tr><td colspan="12" style="text-align:center; color:#64748b; padding:28px;">Sube PDFs y pulsa Extraer datos para generar el maestro.</td></tr>`;
+        resultBody.innerHTML = `<tr><td colspan="13" style="text-align:center; color:#64748b; padding:28px;">Sube PDFs y pulsa Extraer datos para generar el maestro.</td></tr>`;
         renderStats();
         return;
       }
 
       if (!visibleRows.length) {
-        resultBody.innerHTML = `<tr><td colspan="12" style="text-align:center; color:#64748b; padding:28px;">No hay lineas con estos filtros.</td></tr>`;
+        resultBody.innerHTML = `<tr><td colspan="13" style="text-align:center; color:#64748b; padding:28px;">No hay lineas con estos filtros.</td></tr>`;
         renderStats();
         return;
       }
@@ -563,9 +650,14 @@
           <td>${escapeHtml(row.unidad || "-")}</td>
           <td class="${row.confianza === "ALTA" ? "ok" : row.confianza === "MEDIA" ? "review" : "bad"}">${escapeHtml(row.confianza)}</td>
           <td>${escapeHtml([row.aviso, row.duplicado].filter(Boolean).join(" | ") || "-")}</td>
+          <td><button class="small-btn" type="button" data-edit-index="${rowGlobalIndex(row)}">Editar</button></td>
         </tr>
       `).join("");
       renderStats();
+    }
+
+    function rowGlobalIndex(row) {
+      return state.rows.indexOf(row);
     }
 
     function escapeHtml(value) {
@@ -590,6 +682,95 @@
       state.files = Array.from(byKey.values());
       setMessage(repeated ? `${repeated} PDF ya estaban en la lista y no se han duplicado.` : "");
       renderFiles();
+    }
+
+    function normalizeImportedRow(row) {
+      return {
+        archivo: clean(row.Archivo),
+        ordenFabricacion: clean(row.OF),
+        fecha: clean(row.Fecha),
+        producto: clean(row.Producto),
+        loteOf: clean(row["Lote OF"]),
+        codigoArticulo: clean(row["Codigo articulo"] || row["Código artículo"]),
+        descripcion: clean(row.Descripcion || row["Descripción"]),
+        lote: clean(row.Lote),
+        cantidad: clean(row.Cantidad),
+        unidad: clean(row.Unidad),
+        confianza: clean(row.Confianza || "ALTA") || "ALTA",
+        aviso: clean(row.Aviso),
+        duplicado: ""
+      };
+    }
+
+    async function importExcel(file) {
+      if (!file) return;
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: "array" });
+      const sheetName = workbook.SheetNames.includes("Composiciones") ? "Composiciones" : workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const imported = XLSX.utils.sheet_to_json(sheet, { defval: "" }).map(normalizeImportedRow).filter((row) => row.codigoArticulo || row.ordenFabricacion || row.lote);
+      state.rows.push(...imported);
+      markDuplicateRows();
+      setMessage(`Excel importado: ${imported.length} lineas anadidas al maestro.`);
+      renderRows();
+      renderWarnings();
+    }
+
+    function openEdit(index) {
+      const row = state.rows[index];
+      if (!row) return;
+      editingIndex = index;
+      document.getElementById("editArchivo").value = row.archivo || "";
+      document.getElementById("editOF").value = row.ordenFabricacion || "";
+      document.getElementById("editFecha").value = row.fecha || "";
+      document.getElementById("editProducto").value = row.producto || "";
+      document.getElementById("editLoteOf").value = row.loteOf || "";
+      document.getElementById("editCodigo").value = row.codigoArticulo || "";
+      document.getElementById("editDescripcion").value = row.descripcion || "";
+      document.getElementById("editLote").value = row.lote || "";
+      document.getElementById("editCantidad").value = row.cantidad || "";
+      document.getElementById("editUnidad").value = row.unidad || "";
+      document.getElementById("editConfianza").value = row.confianza || "ALTA";
+      document.getElementById("editAviso").value = row.aviso || "";
+      editModal.hidden = false;
+    }
+
+    function closeEdit() {
+      editingIndex = -1;
+      editModal.hidden = true;
+    }
+
+    function saveEdit() {
+      if (editingIndex < 0 || !state.rows[editingIndex]) return;
+      state.rows[editingIndex] = {
+        ...state.rows[editingIndex],
+        archivo: clean(document.getElementById("editArchivo").value),
+        ordenFabricacion: clean(document.getElementById("editOF").value),
+        fecha: clean(document.getElementById("editFecha").value),
+        producto: clean(document.getElementById("editProducto").value),
+        loteOf: clean(document.getElementById("editLoteOf").value),
+        codigoArticulo: clean(document.getElementById("editCodigo").value),
+        descripcion: clean(document.getElementById("editDescripcion").value),
+        lote: clean(document.getElementById("editLote").value),
+        cantidad: clean(document.getElementById("editCantidad").value),
+        unidad: clean(document.getElementById("editUnidad").value),
+        confianza: clean(document.getElementById("editConfianza").value) || "ALTA",
+        aviso: clean(document.getElementById("editAviso").value),
+        duplicado: ""
+      };
+      markDuplicateRows();
+      renderRows();
+      closeEdit();
+      setMessage("Linea editada.");
+    }
+
+    function deleteEdit() {
+      if (editingIndex < 0 || !state.rows[editingIndex]) return;
+      state.rows.splice(editingIndex, 1);
+      markDuplicateRows();
+      renderRows();
+      closeEdit();
+      setMessage("Linea eliminada.");
     }
 
     async function parsePdf(file) {
@@ -759,8 +940,23 @@
 
     selectButton.addEventListener("click", () => fileInput.click());
     fileInput.addEventListener("change", (event) => addFiles(event.target.files));
+    importExcelButton.addEventListener("click", () => excelInput.click());
+    excelInput.addEventListener("change", (event) => {
+      importExcel(event.target.files?.[0]);
+      event.target.value = "";
+    });
     extractButton.addEventListener("click", extractAll);
     exportButton.addEventListener("click", exportExcel);
+    resultBody.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-edit-index]");
+      if (button) openEdit(Number(button.dataset.editIndex));
+    });
+    closeEditButton.addEventListener("click", closeEdit);
+    saveEditButton.addEventListener("click", saveEdit);
+    deleteEditButton.addEventListener("click", deleteEdit);
+    editModal.addEventListener("click", (event) => {
+      if (event.target === editModal) closeEdit();
+    });
     clearButton.addEventListener("click", () => {
       state.files = [];
       state.rows = [];
@@ -798,3 +994,4 @@
   </script>
 </body>
 </html>
+

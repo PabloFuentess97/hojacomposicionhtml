@@ -221,6 +221,28 @@
       padding: 8px 10px;
     }
 
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .tab-button {
+      border-color: #9eb3c8;
+      background: #fff;
+    }
+
+    .tab-button.active {
+      border-color: #1769d6;
+      background: linear-gradient(180deg, #2f86f6, #1769d6);
+      color: #fff;
+    }
+
+    .tab-panel[hidden] {
+      display: none;
+    }
+
     .warning {
       border: 1px solid #f4c152;
       background: #fff8e1;
@@ -401,7 +423,12 @@
       </aside>
     </section>
 
-    <section class="card" style="margin-top: 14px;">
+    <div class="tabs">
+      <button id="tabComposicion" class="tab-button active" type="button">Composicion actual</button>
+      <button id="tabProyecto" class="tab-button" type="button">Datos OF + Proyecto</button>
+    </div>
+
+    <section id="panelComposicion" class="card tab-panel" style="margin-top: 14px;">
       <div class="panel-head">
         <strong>Resultado extraido</strong>
         <span class="muted"><span id="rowCount">0</span> lineas</span>
@@ -445,6 +472,37 @@
         </table>
       </div>
     </section>
+
+    <section id="panelProyecto" class="card tab-panel" style="margin-top: 14px;" hidden>
+      <div class="panel-head">
+        <strong>Datos OF + Proyecto</strong>
+        <span class="muted"><span id="projectRowCount">0</span> lineas</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Archivo</th>
+              <th>OF</th>
+              <th>Proyecto</th>
+              <th>Fecha</th>
+              <th>Producto</th>
+              <th>Lote OF</th>
+              <th>Codigo articulo</th>
+              <th>Descripcion</th>
+              <th>Lote</th>
+              <th>Cantidad</th>
+              <th>Unidad</th>
+              <th>Confianza</th>
+              <th>Aviso</th>
+            </tr>
+          </thead>
+          <tbody id="projectResultBody">
+            <tr><td colspan="13" style="text-align:center; color:#64748b; padding:28px;">Sube PDFs y pulsa Extraer datos para ver tambien el proyecto.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
   </main>
 
   <div id="editModal" class="modal-backdrop" hidden>
@@ -457,6 +515,7 @@
         <label>Archivo<input id="editArchivo" type="text"></label>
         <label>OF<input id="editOF" type="text"></label>
         <label>Fecha<input id="editFecha" type="text"></label>
+        <label>Proyecto<input id="editProyecto" type="text"></label>
         <label>Lote OF<input id="editLoteOf" type="text"></label>
         <label class="wide">Producto<input id="editProducto" type="text"></label>
         <label>Codigo articulo<input id="editCodigo" type="text"></label>
@@ -505,6 +564,12 @@
     const warningsList = document.getElementById("warnings");
     const resultBody = document.getElementById("resultBody");
     const rowCount = document.getElementById("rowCount");
+    const projectResultBody = document.getElementById("projectResultBody");
+    const projectRowCount = document.getElementById("projectRowCount");
+    const tabComposicion = document.getElementById("tabComposicion");
+    const tabProyecto = document.getElementById("tabProyecto");
+    const panelComposicion = document.getElementById("panelComposicion");
+    const panelProyecto = document.getElementById("panelProyecto");
     const searchInput = document.getElementById("searchInput");
     const confidenceFilter = document.getElementById("confidenceFilter");
     const reviewFilter = document.getElementById("reviewFilter");
@@ -543,6 +608,11 @@
       return clean(value).match(/\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b/)?.[0] || "";
     }
 
+    function extractProyecto(pageText) {
+      const direct = pageText.match(/Proyecto:\s*([A-Z0-9._/-]+)/i)?.[1];
+      return clean(direct || "");
+    }
+
     function setMessage(text) {
       message.hidden = !text;
       message.textContent = text || "";
@@ -579,7 +649,16 @@
       document.getElementById("statLots").textContent = lots.size;
       document.getElementById("statReview").textContent = state.rows.filter((row) => row.confianza !== "ALTA" || row.aviso || row.duplicado).length;
       rowCount.textContent = state.rows.length;
+      projectRowCount.textContent = state.rows.length;
       exportButton.disabled = state.rows.length === 0;
+    }
+
+    function showTab(name) {
+      const project = name === "proyecto";
+      panelComposicion.hidden = project;
+      panelProyecto.hidden = !project;
+      tabComposicion.classList.toggle("active", !project);
+      tabProyecto.classList.toggle("active", project);
     }
 
     function markDuplicateRows() {
@@ -630,12 +709,14 @@
       const visibleRows = filteredRows();
       if (!state.rows.length) {
         resultBody.innerHTML = `<tr><td colspan="13" style="text-align:center; color:#64748b; padding:28px;">Sube PDFs y pulsa Extraer datos para generar el maestro.</td></tr>`;
+        projectResultBody.innerHTML = `<tr><td colspan="13" style="text-align:center; color:#64748b; padding:28px;">Sube PDFs y pulsa Extraer datos para ver tambien el proyecto.</td></tr>`;
         renderStats();
         return;
       }
 
       if (!visibleRows.length) {
         resultBody.innerHTML = `<tr><td colspan="13" style="text-align:center; color:#64748b; padding:28px;">No hay lineas con estos filtros.</td></tr>`;
+        projectResultBody.innerHTML = `<tr><td colspan="13" style="text-align:center; color:#64748b; padding:28px;">No hay lineas con estos filtros.</td></tr>`;
         renderStats();
         return;
       }
@@ -655,6 +736,23 @@
           <td class="${row.confianza === "ALTA" ? "ok" : row.confianza === "MEDIA" ? "review" : "bad"}">${escapeHtml(row.confianza)}</td>
           <td>${escapeHtml([row.aviso, row.duplicado].filter(Boolean).join(" | ") || "-")}</td>
           <td><button class="small-btn" type="button" data-edit-index="${rowGlobalIndex(row)}">Editar</button></td>
+        </tr>
+      `).join("");
+      projectResultBody.innerHTML = visibleRows.map((row) => `
+        <tr>
+          <td>${escapeHtml(row.archivo)}</td>
+          <td class="bold">${escapeHtml(row.ordenFabricacion || "-")}</td>
+          <td class="bold">${escapeHtml(row.proyecto || "-")}</td>
+          <td>${escapeHtml(row.fecha || "-")}</td>
+          <td>${escapeHtml(row.producto || "-")}</td>
+          <td>${escapeHtml(row.loteOf || "-")}</td>
+          <td class="bold">${escapeHtml(row.codigoArticulo || "-")}</td>
+          <td>${escapeHtml(row.descripcion || "-")}</td>
+          <td class="bold">${escapeHtml(row.lote || "-")}</td>
+          <td class="right">${escapeHtml(row.cantidad || "-")}</td>
+          <td>${escapeHtml(row.unidad || "-")}</td>
+          <td class="${row.confianza === "ALTA" ? "ok" : row.confianza === "MEDIA" ? "review" : "bad"}">${escapeHtml(row.confianza)}</td>
+          <td>${escapeHtml([row.aviso, row.duplicado].filter(Boolean).join(" | ") || "-")}</td>
         </tr>
       `).join("");
       renderStats();
@@ -693,6 +791,7 @@
         archivo: clean(row.Archivo),
         ordenFabricacion: clean(row.OF),
         fecha: clean(row.Fecha),
+        proyecto: clean(row.Proyecto),
         producto: clean(row.Producto),
         loteOf: clean(row["Lote OF"]),
         codigoArticulo: clean(row["Codigo articulo"] || row["Código artículo"]),
@@ -727,6 +826,7 @@
       document.getElementById("editArchivo").value = row.archivo || "";
       document.getElementById("editOF").value = row.ordenFabricacion || "";
       document.getElementById("editFecha").value = row.fecha || "";
+      document.getElementById("editProyecto").value = row.proyecto || "";
       document.getElementById("editProducto").value = row.producto || "";
       document.getElementById("editLoteOf").value = row.loteOf || "";
       document.getElementById("editCodigo").value = row.codigoArticulo || "";
@@ -751,6 +851,7 @@
         archivo: clean(document.getElementById("editArchivo").value),
         ordenFabricacion: clean(document.getElementById("editOF").value),
         fecha: clean(document.getElementById("editFecha").value),
+        proyecto: clean(document.getElementById("editProyecto").value),
         producto: clean(document.getElementById("editProducto").value),
         loteOf: clean(document.getElementById("editLoteOf").value),
         codigoArticulo: clean(document.getElementById("editCodigo").value),
@@ -782,6 +883,7 @@
       const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
       const rows = [];
       const warnings = [];
+      const metadata = { proyecto: "" };
 
       for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
         const page = await pdf.getPage(pageNumber);
@@ -795,6 +897,7 @@
           .filter((item) => item.text.length > 0);
 
         const pageText = items.map((item) => item.text).join(" ");
+        if (!metadata.proyecto) metadata.proyecto = extractProyecto(pageText);
         if (!/HOJA DE COMPOSICI[ÓO]N/i.test(pageText)) continue;
 
         const ordenFabricacion =
@@ -828,6 +931,7 @@
             archivo: file.name,
             ordenFabricacion,
             fecha,
+            proyecto: metadata.proyecto,
             producto,
             loteOf,
             codigoArticulo: code.text,
@@ -896,6 +1000,7 @@
         Archivo: row.archivo,
         OF: row.ordenFabricacion,
         Fecha: row.fecha,
+        Proyecto: row.proyecto || "",
         Producto: row.producto,
         "Lote OF": row.loteOf,
         "Codigo articulo": row.codigoArticulo,
@@ -910,6 +1015,22 @@
 
       const workbook = XLSX.utils.book_new();
       const sheet = XLSX.utils.json_to_sheet(data);
+      const dataProyecto = state.rows.map((row) => ({
+        Archivo: row.archivo,
+        OF: row.ordenFabricacion,
+        Proyecto: row.proyecto || "",
+        Fecha: row.fecha,
+        Producto: row.producto,
+        "Lote OF": row.loteOf,
+        "Codigo articulo": row.codigoArticulo,
+        Descripcion: row.descripcion,
+        Lote: row.lote,
+        Cantidad: row.cantidad,
+        Unidad: row.unidad,
+        Confianza: row.confianza,
+        Aviso: row.aviso,
+        Duplicado: row.duplicado || ""
+      }));
       const ofs = new Set(state.rows.map((row) => row.ordenFabricacion).filter(Boolean));
       const lots = new Set(state.rows.map((row) => row.lote).filter(Boolean));
       const articles = new Set(state.rows.map((row) => row.codigoArticulo).filter(Boolean));
@@ -936,7 +1057,9 @@
       ];
       const resumenSheet = XLSX.utils.json_to_sheet(resumen);
       const avisosSheet = XLSX.utils.json_to_sheet(avisos.length ? avisos : [{ Tipo: "OK", Aviso: "Sin avisos", Archivo: "", OF: "", Articulo: "", Lote: "" }]);
+      const proyectoSheet = XLSX.utils.json_to_sheet(dataProyecto);
       XLSX.utils.book_append_sheet(workbook, sheet, "Composiciones");
+      XLSX.utils.book_append_sheet(workbook, proyectoSheet, "OF_Proyecto");
       XLSX.utils.book_append_sheet(workbook, resumenSheet, "Resumen");
       XLSX.utils.book_append_sheet(workbook, avisosSheet, "Avisos");
       XLSX.writeFile(workbook, `maestro-hojas-composicion-${new Date().toISOString().slice(0, 10)}.xlsx`);
@@ -988,6 +1111,8 @@
     });
 
     dropZone.addEventListener("drop", (event) => addFiles(event.dataTransfer.files));
+    tabComposicion.addEventListener("click", () => showTab("composicion"));
+    tabProyecto.addEventListener("click", () => showTab("proyecto"));
     searchInput.addEventListener("input", renderRows);
     confidenceFilter.addEventListener("change", renderRows);
     reviewFilter.addEventListener("change", renderRows);
